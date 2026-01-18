@@ -71,8 +71,7 @@ function calculateAngle(a, b, c) {
   const magAB = Math.sqrt(ab.x ** 2 + ab.y ** 2);
   const magCB = Math.sqrt(cb.x ** 2 + cb.y ** 2);
 
-  const angleRad = Math.acos(dot / (magAB * magCB));
-  return angleRad * (180 / Math.PI);
+  return Math.acos(dot / (magAB * magCB)) * (180 / Math.PI);
 }
 
 /*************************************************
@@ -104,12 +103,45 @@ function scoreTechnique(angles) {
 }
 
 /*************************************************
- * STEP 4: TECHNIQUE STATE MACHINE
+ * BOXING STANCE DETECTION
  *************************************************/
-let techniqueState = "idle"; // idle → executing → cooldown
+function isInBoxingStance(lm) {
+  const L = JOINTS.left;
+  const R = JOINTS.right;
+
+  // Hands up
+  const handsUp =
+    lm[L.wrist].y < lm[L.shoulder].y + 0.05 &&
+    lm[R.wrist].y < lm[R.shoulder].y + 0.05;
+
+  // Elbows bent
+  const leftElbow = calculateAngle(lm[L.shoulder], lm[L.elbow], lm[L.wrist]);
+  const rightElbow = calculateAngle(lm[R.shoulder], lm[R.elbow], lm[R.wrist]);
+  const elbowsBent = leftElbow < 130 && rightElbow < 130;
+
+  // Feet apart
+  const ankleDist = Math.abs(lm[L.ankle].x - lm[R.ankle].x);
+  const hipDist = Math.abs(lm[L.hip].x - lm[R.hip].x);
+  const feetApart = ankleDist > hipDist * 0.9;
+
+  // Upright torso
+  const torsoAngle = calculateAngle(lm[L.shoulder], lm[L.hip], lm[L.knee]);
+  const upright = torsoAngle > 160;
+
+  return handsUp && elbowsBent && feetApart && upright;
+}
+
+/*************************************************
+ * TECHNIQUE STATE MACHINE
+ *************************************************/
+let techniqueState = "notReady"; // notReady → idle → executing → cooldown
 let peakScore = 0;
 let lastRepScore = null;
 let cooldownCounter = 0;
+
+// stance forgiveness
+let stanceGraceFrames = 0;
+const STANCE_GRACE_LIMIT = 8;
 
 const MOVEMENT = {
   startElbowAngle: 120,
@@ -118,7 +150,7 @@ const MOVEMENT = {
 };
 
 /*************************************************
- * DRAWING HELPERS
+ * DRAWING
  *************************************************/
 function drawText(text, x, y, color = "yellow", size = 20) {
   ctx.fillStyle = color;
@@ -131,27 +163,39 @@ function drawText(text, x, y, color = "yellow", size = 20) {
  *************************************************/
 function onResults(results) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-
   if (!results.poseLandmarks) return;
 
   const lm = results.poseLandmarks;
 
-  // Draw skeleton
   drawConnectors(ctx, lm, POSE_CONNECTIONS, {
     color: "#00FF00",
     lineWidth: 3,
   });
   drawLandmarks(ctx, lm, { color: "#FF0000", lineWidth: 2 });
 
-  // Determine active side (front arm)
-  const activeSide =
-    lm[JOINTS.left.wrist].x < lm[JOINTS.right.wrist].x
-      ? "left"
-      : "right";
+  /************ STANCE HANDLING ************/
+  const inStance = isInBoxingStance(lm);
 
+  if (!inStance) {
+    stanceGraceFrames++;
+  } else {
+    stanceGraceFrames = 0;
+  }
+
+  if (stanceGraceFrames > STANCE_GRACE_LIMIT && techniqueState === "idle") {
+    techniqueState = "notReady";
+  }
+
+  if (inStance && techniqueState === "notReady") {
+    techniqueState = "idle";
+  }
+
+  /************ ACTIVE SIDE ************/
+  const activeSide =
+    lm[JOINTS.left.wrist].x < lm[JOINTS.right.wrist].x ? "left" : "right";
   const J = JOINTS[activeSide];
 
-  // Calculate angles
+  /************ ANGLES ************/
   const angles = {
     elbow: calculateAngle(lm[J.shoulder], lm[J.elbow], lm[J.wrist]),
     shoulder: calculateAngle(lm[J.elbow], lm[J.shoulder], lm[J.hip]),
@@ -159,22 +203,16 @@ function onResults(results) {
     knee: calculateAngle(lm[J.hip], lm[J.knee], lm[J.ankle]),
   };
 
-  // Live score
   const liveScore = scoreTechnique(angles);
 
-  /*************************************************
-   * STATE MACHINE LOGIC
-   *************************************************/
-  if (techniqueState === "idle") {
-    if (angles.elbow < MOVEMENT.startElbowAngle) {
-      techniqueState = "executing";
-      peakScore = 0;
-    }
+  /************ EXECUTION LOGIC ************/
+  if (techniqueState === "idle" && angles.elbow < MOVEMENT.startElbowAngle) {
+    techniqueState = "executing";
+    peakScore = 0;
   }
 
   if (techniqueState === "executing") {
     peakScore = Math.max(peakScore, liveScore);
-
     if (angles.elbow > MOVEMENT.peakElbowAngle) {
       techniqueState = "cooldown";
       lastRepScore = peakScore;
@@ -189,16 +227,20 @@ function onResults(results) {
     }
   }
 
-  /*************************************************
-   * UI OVERLAY
-   *************************************************/
-  drawText(`Side: ${activeSide}`, 20, 30);
-  drawText(`State: ${techniqueState}`, 20, 60);
-  drawText(`Live Score: ${liveScore}`, 20, 90);
+  /************ UI ************/
+  drawText(
+    `STANCE: ${inStance ? "READY" : "NOT READY"}`,
+    20,
+    30,
+    inStance ? "lime" : "red",
+    24
+  );
+  drawText(`STATE: ${techniqueState}`, 20, 60);
+  drawText(`LIVE SCORE: ${liveScore}`, 20, 90);
 
   if (lastRepScore !== null) {
     drawText(
-      `Last Rep: ${lastRepScore}`,
+      `LAST REP: ${lastRepScore}`,
       20,
       130,
       lastRepScore > 80 ? "lime" : "orange",
@@ -206,16 +248,10 @@ function onResults(results) {
     );
   }
 
-  // Draw joint angles near joints
+  // Joint labels
   drawText(
     `${angles.elbow.toFixed(0)}°`,
     lm[J.elbow].x * canvas.width,
     lm[J.elbow].y * canvas.height
-  );
-
-  drawText(
-    `${angles.knee.toFixed(0)}°`,
-    lm[J.knee].x * canvas.width,
-    lm[J.knee].y * canvas.height
   );
 }

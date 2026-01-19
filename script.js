@@ -9,7 +9,7 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
 /*************************************************
- * MEDIAPIPE POSE SETUP
+ * MEDIAPIPE POSE
  *************************************************/
 const pose = new Pose({
   locateFile: (file) =>
@@ -26,232 +26,225 @@ pose.setOptions({
 pose.onResults(onResults);
 
 /*************************************************
- * CAMERA
+ * CAMERA (FRAME SAFE)
  *************************************************/
+let processingFrame = false;
+
 const camera = new Camera(video, {
   onFrame: async () => {
+    if (processingFrame) return;
+    processingFrame = true;
     await pose.send({ image: video });
+    processingFrame = false;
   },
   width: 1280,
   height: 720,
 });
-
 camera.start();
 
 /*************************************************
- * LANDMARK INDICES
+ * JOINT MAP
  *************************************************/
-const JOINTS = {
-  left: {
-    shoulder: 11,
-    elbow: 13,
-    wrist: 15,
-    hip: 23,
-    knee: 25,
-    ankle: 27,
-  },
-  right: {
-    shoulder: 12,
-    elbow: 14,
-    wrist: 16,
-    hip: 24,
-    knee: 26,
-    ankle: 28,
-  },
+const J = {
+  L: { s: 11, e: 13, w: 15, h: 23, k: 25, a: 27, f: 31 },
+  R: { s: 12, e: 14, w: 16, h: 24, k: 26, a: 28, f: 32 },
 };
 
 /*************************************************
- * ANGLE MATH
+ * SAFE MATH
  *************************************************/
-function calculateAngle(a, b, c) {
-  const ab = { x: a.x - b.x, y: a.y - b.y };
-  const cb = { x: c.x - b.x, y: c.y - b.y };
+function angle(a, b, c) {
+  if (!a || !b || !c) return 180;
 
-  const dot = ab.x * cb.x + ab.y * cb.y;
-  const magAB = Math.sqrt(ab.x ** 2 + ab.y ** 2);
-  const magCB = Math.sqrt(cb.x ** 2 + cb.y ** 2);
+  const abx = a.x - b.x;
+  const aby = a.y - b.y;
+  const cbx = c.x - b.x;
+  const cby = c.y - b.y;
 
-  return Math.acos(dot / (magAB * magCB)) * (180 / Math.PI);
+  const magAB = Math.hypot(abx, aby);
+  const magCB = Math.hypot(cbx, cby);
+  if (magAB < 0.0001 || magCB < 0.0001) return 180;
+
+  let cos = (abx * cbx + aby * cby) / (magAB * magCB);
+  cos = Math.max(-1, Math.min(1, cos));
+  return Math.acos(cos) * (180 / Math.PI);
+}
+
+function hasLandmark(lm, i) {
+  return lm[i] && lm[i].visibility > 0.4;
+}
+
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
 }
 
 /*************************************************
- * TECHNIQUE DEFINITION (STRAIGHT PUNCH)
+ * HISTORY & PERSONALIZATION
  *************************************************/
-const technique = {
-  elbow: { min: 160, max: 180, weight: 0.4 },
-  shoulder: { min: 40, max: 75, weight: 0.2 },
-  hip: { min: 20, max: 45, weight: 0.25 },
-  knee: { min: 150, max: 180, weight: 0.15 },
+const stanceHistory = [];
+const HISTORY_LIMIT = 300;
+
+const mistakeCounter = {
+  guardDrop: 0,
+  narrowStance: 0,
+  poorBalance: 0,
+  lockedKnees: 0,
+  badFootAngle: 0,
 };
 
 /*************************************************
- * SCORING
+ * STANCE ANALYSIS
  *************************************************/
-function scoreAngle(angle, min, max) {
-  if (angle >= min && angle <= max) return 1;
-  const distance = angle < min ? min - angle : angle - max;
-  return Math.max(0, 1 - distance / 45);
-}
+function analyzeStance(lm, isPunching) {
+  let score = 100;
+  const feedback = [];
 
-function scoreTechnique(angles) {
-  let total = 0;
-  for (const joint in technique) {
-    const { min, max, weight } = technique[joint];
-    total += scoreAngle(angles[joint], min, max) * weight;
+  const stance =
+    lm[J.L.a].z < lm[J.R.a].z ? "Orthodox" : "Southpaw";
+
+  // Balance
+  const footWidth = Math.abs(lm[J.L.a].x - lm[J.R.a].x);
+  const hipWidth = Math.abs(lm[J.L.h].x - lm[J.R.h].x);
+
+  if (footWidth < hipWidth * 1.15) {
+    score -= 12;
+    mistakeCounter.narrowStance++;
+    feedback.push("Widen your stance for better balance");
   }
-  return Math.round(total * 100);
-}
 
-/*************************************************
- * BOXING STANCE DETECTION
- *************************************************/
-function isInBoxingStance(lm) {
-  const L = JOINTS.left;
-  const R = JOINTS.right;
+  const feetCenter = (lm[J.L.a].x + lm[J.R.a].x) / 2;
+  const hipCenter = (lm[J.L.h].x + lm[J.R.h].x) / 2;
 
-  // Hands up
+  if (Math.abs(feetCenter - hipCenter) > 0.06) {
+    score -= 10;
+    mistakeCounter.poorBalance++;
+    feedback.push("Keep your weight centered");
+  }
+
+  // Mobility
+  const leftKnee = angle(lm[J.L.h], lm[J.L.k], lm[J.L.a]);
+  const rightKnee = angle(lm[J.R.h], lm[J.R.k], lm[J.R.a]);
+
+  if (leftKnee > 175 || rightKnee > 175) {
+    score -= 10;
+    mistakeCounter.lockedKnees++;
+    feedback.push("Bend your knees slightly");
+  }
+
+  // Foot angles
+  const lead = stance === "Orthodox" ? J.L : J.R;
+  const rear = stance === "Orthodox" ? J.R : J.L;
+
+  let leadFootAngle = 160;
+  let rearFootAngle = 140;
+
+  if (hasLandmark(lm, lead.k) && hasLandmark(lm, lead.a) && hasLandmark(lm, lead.f))
+    leadFootAngle = angle(lm[lead.k], lm[lead.a], lm[lead.f]);
+
+  if (hasLandmark(lm, rear.k) && hasLandmark(lm, rear.a) && hasLandmark(lm, rear.f))
+    rearFootAngle = angle(lm[rear.k], lm[rear.a], lm[rear.f]);
+
+  if (leadFootAngle < 140 || rearFootAngle < 110) {
+    score -= 10;
+    mistakeCounter.badFootAngle++;
+    feedback.push("Angle your feet for rotation");
+  }
+
+  // Posture
+  const spine = angle(lm[J.L.s], lm[J.L.h], lm[J.L.k]);
+  if (spine < 165) {
+    score -= 8;
+    feedback.push("Stay upright — avoid leaning");
+  }
+
+  // Guard
   const handsUp =
-    lm[L.wrist].y < lm[L.shoulder].y + 0.05 &&
-    lm[R.wrist].y < lm[R.shoulder].y + 0.05;
+    lm[J.L.w].y < lm[J.L.s].y + 0.08 &&
+    lm[J.R.w].y < lm[J.R.s].y + 0.08;
 
-  // Elbows bent
-  const leftElbow = calculateAngle(lm[L.shoulder], lm[L.elbow], lm[L.wrist]);
-  const rightElbow = calculateAngle(lm[R.shoulder], lm[R.elbow], lm[R.wrist]);
-  const elbowsBent = leftElbow < 130 && rightElbow < 130;
+  if (!handsUp && !isPunching) {
+    score -= 12;
+    feedback.push("Hands up — protect your head");
+  }
 
-  // Feet apart
-  const ankleDist = Math.abs(lm[L.ankle].x - lm[R.ankle].x);
-  const hipDist = Math.abs(lm[L.hip].x - lm[R.hip].x);
-  const feetApart = ankleDist > hipDist * 0.9;
-
-  // Upright torso
-  const torsoAngle = calculateAngle(lm[L.shoulder], lm[L.hip], lm[L.knee]);
-  const upright = torsoAngle > 160;
-
-  return handsUp && elbowsBent && feetApart && upright;
+  return {
+    stance,
+    score: clamp(Math.round(score), 0, 100),
+    feedback,
+  };
 }
 
 /*************************************************
- * TECHNIQUE STATE MACHINE
+ * GUARD DROP
  *************************************************/
-let techniqueState = "notReady"; // notReady → idle → executing → cooldown
-let peakScore = 0;
-let lastRepScore = null;
-let cooldownCounter = 0;
-
-// stance forgiveness
-let stanceGraceFrames = 0;
-const STANCE_GRACE_LIMIT = 8;
-
-const MOVEMENT = {
-  startElbowAngle: 120,
-  peakElbowAngle: 165,
-  cooldownFrames: 15,
-};
+function detectGuardDrop(lm, punchingSide) {
+  const off = punchingSide === "left" ? J.R : J.L;
+  if (lm[off.w].y > lm[off.s].y + 0.1) {
+    mistakeCounter.guardDrop++;
+    return "Guard dropped — keep your other hand up";
+  }
+  return null;
+}
 
 /*************************************************
- * DRAWING
+ * DRAW HELPERS
  *************************************************/
-function drawText(text, x, y, color = "yellow", size = 20) {
-  ctx.fillStyle = color;
-  ctx.font = `${size}px Arial`;
-  ctx.fillText(text, x, y);
+function text(t, x, y, c = "white", s = 20) {
+  ctx.fillStyle = c;
+  ctx.font = `${s}px Arial`;
+  ctx.fillText(t, x, y);
+}
+
+function drawGraph(data, x, y, w, h) {
+  ctx.strokeStyle = "lime";
+  ctx.beginPath();
+  data.forEach((v, i) => {
+    const px = x + (i / data.length) * w;
+    const py = y + h - (v / 100) * h;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  });
+  ctx.stroke();
 }
 
 /*************************************************
  * MAIN LOOP
  *************************************************/
-function onResults(results) {
+function onResults(res) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (!results.poseLandmarks) return;
+  if (!res.poseLandmarks) return;
 
-  const lm = results.poseLandmarks;
+  const lm = res.poseLandmarks;
 
-  drawConnectors(ctx, lm, POSE_CONNECTIONS, {
-    color: "#00FF00",
-    lineWidth: 3,
+  drawConnectors(ctx, lm, POSE_CONNECTIONS, { color: "#00ff00", lineWidth: 3 });
+  drawLandmarks(ctx, lm, { color: "#ff0000", lineWidth: 2 });
+
+  const punchingSide = lm[J.L.w].x < lm[J.R.w].x ? "left" : "right";
+  const arm = punchingSide === "left" ? J.L : J.R;
+
+  const isPunching = angle(lm[arm.s], lm[arm.e], lm[arm.w]) > 155;
+
+  const stanceEval = analyzeStance(lm, isPunching);
+  const guardMsg = isPunching ? detectGuardDrop(lm, punchingSide) : null;
+
+  stanceHistory.push(stanceEval.score);
+  if (stanceHistory.length > HISTORY_LIMIT) stanceHistory.shift();
+
+  const topMistake = Object.entries(mistakeCounter)
+    .sort((a, b) => b[1] - a[1])[0][0];
+
+  // UI
+  text(`STANCE: ${stanceEval.stance}`, 20, 30, "cyan", 26);
+  text(`STANCE SCORE: ${stanceEval.score}`, 20, 65, "lime", 26);
+
+  stanceEval.feedback.slice(0, 2).forEach((f, i) => {
+    text(`• ${f}`, 20, 105 + i * 24, "orange", 20);
   });
-  drawLandmarks(ctx, lm, { color: "#FF0000", lineWidth: 2 });
 
-  /************ STANCE HANDLING ************/
-  const inStance = isInBoxingStance(lm);
+  if (guardMsg) text(`⚠ ${guardMsg}`, 20, 165, "red", 22);
 
-  if (!inStance) {
-    stanceGraceFrames++;
-  } else {
-    stanceGraceFrames = 0;
-  }
+  text(`FOCUS: ${topMistake.replace(/([A-Z])/g, " $1")}`, 20, 200, "yellow", 20);
 
-  if (stanceGraceFrames > STANCE_GRACE_LIMIT && techniqueState === "idle") {
-    techniqueState = "notReady";
-  }
-
-  if (inStance && techniqueState === "notReady") {
-    techniqueState = "idle";
-  }
-
-  /************ ACTIVE SIDE ************/
-  const activeSide =
-    lm[JOINTS.left.wrist].x < lm[JOINTS.right.wrist].x ? "left" : "right";
-  const J = JOINTS[activeSide];
-
-  /************ ANGLES ************/
-  const angles = {
-    elbow: calculateAngle(lm[J.shoulder], lm[J.elbow], lm[J.wrist]),
-    shoulder: calculateAngle(lm[J.elbow], lm[J.shoulder], lm[J.hip]),
-    hip: calculateAngle(lm[J.shoulder], lm[J.hip], lm[J.knee]),
-    knee: calculateAngle(lm[J.hip], lm[J.knee], lm[J.ankle]),
-  };
-
-  const liveScore = scoreTechnique(angles);
-
-  /************ EXECUTION LOGIC ************/
-  if (techniqueState === "idle" && angles.elbow < MOVEMENT.startElbowAngle) {
-    techniqueState = "executing";
-    peakScore = 0;
-  }
-
-  if (techniqueState === "executing") {
-    peakScore = Math.max(peakScore, liveScore);
-    if (angles.elbow > MOVEMENT.peakElbowAngle) {
-      techniqueState = "cooldown";
-      lastRepScore = peakScore;
-      cooldownCounter = 0;
-    }
-  }
-
-  if (techniqueState === "cooldown") {
-    cooldownCounter++;
-    if (cooldownCounter > MOVEMENT.cooldownFrames) {
-      techniqueState = "idle";
-    }
-  }
-
-  /************ UI ************/
-  drawText(
-    `STANCE: ${inStance ? "READY" : "NOT READY"}`,
-    20,
-    30,
-    inStance ? "lime" : "red",
-    24
-  );
-  drawText(`STATE: ${techniqueState}`, 20, 60);
-  drawText(`LIVE SCORE: ${liveScore}`, 20, 90);
-
-  if (lastRepScore !== null) {
-    drawText(
-      `LAST REP: ${lastRepScore}`,
-      20,
-      130,
-      lastRepScore > 80 ? "lime" : "orange",
-      28
-    );
-  }
-
-  // Joint labels
-  drawText(
-    `${angles.elbow.toFixed(0)}°`,
-    lm[J.elbow].x * canvas.width,
-    lm[J.elbow].y * canvas.height
-  );
+  drawGraph(stanceHistory, canvas.width - 260, 40, 240, 100);
+  text("Stance Consistency", canvas.width - 260, 30, "white", 16);
 }

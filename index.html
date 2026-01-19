@@ -2,36 +2,35 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <title>Boxing Coach AI</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Martial Arts Trainer</title>
+  <link rel="stylesheet" href="style.css" />
 
   <!-- MediaPipe -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
-  <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background: black;
-      color: white;
-      font-family: Arial, sans-serif;
-    }
-
-    video, canvas {
-      position: absolute;
-      width: 100vw;
-      height: 100vh;
-      object-fit: cover;
-    }
-  </style>
 </head>
 <body>
 
-  <video id="video" autoplay playsinline></video>
-  <canvas id="canvas"></canvas>
+<div id="menu">
+  <h1>🥊 Boxing Coach</h1>
+  <button onclick="startSession('STANCE')">Stance Coaching</button>
+  <button onclick="startSession('JAB')">Jab</button>
+  <button onclick="startSession('CROSS')">Cross</button>
+  <button onclick="startSession('LEAD_HOOK')">Lead Hook</button>
+  <button onclick="startSession('REAR_HOOK')">Rear Hook</button>
+  <button onclick="startSession('LEAD_UPPERCUT')">Lead Uppercut</button>
+  <button onclick="startSession('REAR_UPPERCUT')">Rear Uppercut</button>
+</div>
 
-  <script src="script.js"></script>
+<div id="training" class="hidden">
+  <button id="back" onclick="endSession()">← Back</button>
+  <video id="video" autoplay muted playsinline></video>
+  <canvas id="canvas"></canvas>
+</div>
+
+<script src="script.js"></script>
 </body>
 </html>

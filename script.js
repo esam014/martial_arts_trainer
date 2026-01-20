@@ -16,6 +16,8 @@ let cameraStarted = false;
  *************************************************/
 function startSession(mode) {
   currentMode = mode;
+  lastScore = null;
+  punchState = "IDLE";
   document.getElementById("menu").classList.add("hidden");
   document.getElementById("training").classList.remove("hidden");
   if (!cameraStarted) startCamera();
@@ -68,25 +70,20 @@ function startCamera() {
  * JOINT MAP
  *************************************************/
 const J = {
-  L: { s: 11, e: 13, w: 15, h: 23 },
-  R: { s: 12, e: 14, w: 16, h: 24 }
+  L: { s: 11, e: 13, w: 15 },
+  R: { s: 12, e: 14, w: 16 }
 };
 
 /*************************************************
- * UTILS
+ * MATH UTILS
  *************************************************/
 function angle(a, b, c) {
-  if (!a || !b || !c) return 180;
-  const ab = { x: a.x - b.x, y: a.y - b.y };
-  const cb = { x: c.x - b.x, y: c.y - b.y };
-  const dot = ab.x * cb.x + ab.y * cb.y;
-  const mag = Math.hypot(ab.x, ab.y) * Math.hypot(cb.x, cb.y);
+  const abx = a.x - b.x, aby = a.y - b.y;
+  const cbx = c.x - b.x, cby = c.y - b.y;
+  const dot = abx * cbx + aby * cby;
+  const mag = Math.hypot(abx, aby) * Math.hypot(cbx, cby);
   if (!mag) return 180;
   return Math.acos(Math.min(1, Math.max(-1, dot / mag))) * 180 / Math.PI;
-}
-
-function dist(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
 /*************************************************
@@ -102,7 +99,7 @@ function detectStance(lm) {
 let lastWrist = null;
 let wristVel = { x: 0, y: 0 };
 
-function updateWristMotion(w) {
+function updateWrist(w) {
   if (!lastWrist) {
     lastWrist = { ...w };
     return;
@@ -113,7 +110,7 @@ function updateWristMotion(w) {
 }
 
 /*************************************************
- * PUNCH CLASSIFICATION (IMPROVED)
+ * PUNCH CLASSIFICATION
  *************************************************/
 function classifyPunch(lm, stance) {
   const lead = stance === "Orthodox" ? J.L : J.R;
@@ -122,17 +119,17 @@ function classifyPunch(lm, stance) {
   const leadElbow = angle(lm[lead.s], lm[lead.e], lm[lead.w]);
   const rearElbow = angle(lm[rear.s], lm[rear.e], lm[rear.w]);
 
-  const horiz = Math.abs(wristVel.x);
-  const vert = Math.abs(wristVel.y);
+  const h = Math.abs(wristVel.x);
+  const v = Math.abs(wristVel.y);
 
-  if (leadElbow > 155 && horiz > vert) return "JAB";
-  if (rearElbow > 155 && horiz > vert) return "CROSS";
+  if (leadElbow > 155 && h > v) return "JAB";
+  if (rearElbow > 155 && h > v) return "CROSS";
 
-  if (leadElbow < 130 && horiz > vert * 1.5) return "LEAD_HOOK";
-  if (rearElbow < 130 && horiz > vert * 1.5) return "REAR_HOOK";
+  if (leadElbow < 130 && h > v * 1.5) return "LEAD_HOOK";
+  if (rearElbow < 130 && h > v * 1.5) return "REAR_HOOK";
 
-  if (leadElbow < 130 && vert > horiz) return "LEAD_UPPERCUT";
-  if (rearElbow < 130 && vert > horiz) return "REAR_UPPERCUT";
+  if (leadElbow < 130 && v > h) return "LEAD_UPPERCUT";
+  if (rearElbow < 130 && v > h) return "REAR_UPPERCUT";
 
   return null;
 }
@@ -148,20 +145,17 @@ function processPunch(elbowAngle) {
   switch (punchState) {
     case "IDLE":
       if (elbowAngle < 150) {
-        punchState = "EXTENDING";
         punchPeak = elbowAngle;
+        punchState = "EXTENDING";
       }
       break;
-
     case "EXTENDING":
       punchPeak = Math.min(punchPeak, elbowAngle);
       if (elbowAngle > 165) punchState = "FULL";
       break;
-
     case "FULL":
       if (elbowAngle < 150) punchState = "RETRACTING";
       break;
-
     case "RETRACTING":
       punchState = "IDLE";
       return true;
@@ -170,11 +164,11 @@ function processPunch(elbowAngle) {
 }
 
 /*************************************************
- * SCORING (PUNCH-SPECIFIC)
+ * SCORING
  *************************************************/
-function scorePunch(type, lm, stance) {
+function scorePunch(type, lm) {
   const hipRot = Math.abs(lm[23].x - lm[24].x);
-  const bal = Math.abs(lm[0].x - (lm[23].x + lm[24].x) / 2);
+  const balance = Math.abs(lm[0].x - (lm[23].x + lm[24].x) / 2);
 
   let score = 50;
 
@@ -184,21 +178,21 @@ function scorePunch(type, lm, stance) {
   }
 
   if (type === "CROSS") {
-    score += hipRot * 200;
+    score += hipRot * 220;
     score += (170 - punchPeak) * 2;
   }
 
-  if (type?.includes("HOOK")) {
-    score += hipRot * 250;
+  if (type.includes("HOOK")) {
+    score += hipRot * 260;
     score += Math.abs(wristVel.x) * 5000;
   }
 
-  if (type?.includes("UPPERCUT")) {
+  if (type.includes("UPPERCUT")) {
     score += Math.abs(wristVel.y) * 7000;
-    score += hipRot * 180;
+    score += hipRot * 200;
   }
 
-  score -= bal * 200;
+  score -= balance * 220;
 
   return Math.max(0, Math.min(100, Math.round(score)));
 }
@@ -206,25 +200,38 @@ function scorePunch(type, lm, stance) {
 /*************************************************
  * VOICE COACHING
  *************************************************/
-let lastSpoken = "";
-let lastSpeakTime = 0;
+let lastSpeech = "";
+let lastSpeechTime = 0;
 
 function speak(text) {
   const now = performance.now();
-  if (text === lastSpoken && now - lastSpeakTime < 2000) return;
-  lastSpoken = text;
-  lastSpeakTime = now;
+  if (text === lastSpeech && now - lastSpeechTime < 2000) return;
+  lastSpeech = text;
+  lastSpeechTime = now;
   speechSynthesis.cancel();
   speechSynthesis.speak(new SpeechSynthesisUtterance(text));
 }
 
 function coach(type, score) {
-  if (score > 90) return "Excellent punch";
-  if (type === "JAB" && score < 70) return "Snap the jab faster";
-  if (type === "CROSS" && score < 70) return "Rotate your hips more";
-  if (type?.includes("HOOK") && score < 70) return "Tighter hook, rotate more";
-  if (type?.includes("UPPERCUT") && score < 70) return "Drive up with your legs";
+  if (score >= 90) return "Excellent";
+  if (type === "JAB" && score < 70) return "Snap the jab and retract";
+  if (type === "CROSS" && score < 70) return "Rotate hips and shoulder";
+  if (type.includes("HOOK") && score < 70) return "Tighter hook and rotation";
+  if (type.includes("UPPERCUT") && score < 70) return "Drive upward with legs";
   return null;
+}
+
+/*************************************************
+ * STANCE COACHING
+ *************************************************/
+function stanceIssues(lm) {
+  const issues = [];
+  const hipsX = (lm[23].x + lm[24].x) / 2;
+  if (Math.abs(lm[0].x - hipsX) > 0.06)
+    issues.push("Keep your head centered");
+  if (Math.abs(lm[11].x - lm[12].x) < 0.04)
+    issues.push("Turn your shoulders sideways");
+  return issues;
 }
 
 /*************************************************
@@ -245,22 +252,39 @@ function onResults(res) {
   if (!currentMode) return;
 
   const stance = detectStance(lm);
+
+  // STANCE-ONLY MODE
+  if (currentMode === "STANCE") {
+    const issues = stanceIssues(lm);
+    drawText("STANCE COACHING", 20, 40);
+    if (issues.length) speak(issues[0]);
+    return;
+  }
+
   const punch = classifyPunch(lm, stance);
 
   let arm = stance === "Orthodox" ? J.L : J.R;
   if (punch && punch.includes("REAR")) arm = stance === "Orthodox" ? J.R : J.L;
 
-  updateWristMotion(lm[arm.w]);
-
+  updateWrist(lm[arm.w]);
   const elbowAngle = angle(lm[arm.s], lm[arm.e], lm[arm.w]);
 
-  if (processPunch(elbowAngle) && punch) {
-    lastScore = scorePunch(punch, lm, stance);
+  if (processPunch(elbowAngle)) {
+
+    // Wrong or missing punch
+    if (!punch || punch !== currentMode) {
+      lastScore = 0;
+      speak(`That was not a ${currentMode.toLowerCase()}`);
+      return;
+    }
+
+    // Correct punch
+    lastScore = scorePunch(punch, lm);
     const cue = coach(punch, lastScore);
     if (cue) speak(cue);
   }
 
-  drawText(`MODE: ${currentMode}`, 20, 40);
+  drawText(`DRILL: ${currentMode}`, 20, 40);
   drawText(`STANCE: ${stance}`, 20, 70);
   drawText(`PUNCH: ${punch || "-"}`, 20, 100);
   if (lastScore !== null) drawText(`SCORE: ${lastScore}`, 20, 140);

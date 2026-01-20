@@ -4,25 +4,22 @@
   <meta charset="UTF-8" />
   <title>Boxing Coach AI</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
   <link rel="stylesheet" href="style.css" />
 
   <!-- MediaPipe -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 </head>
 <body>
 
 <div id="menu">
   <h1>🥊 Boxing Coach</h1>
-  <button onclick="startSession('STANCE')">Stance Coaching</button>
   <button onclick="startSession('JAB')">Jab</button>
   <button onclick="startSession('CROSS')">Cross</button>
   <button onclick="startSession('LEAD_HOOK')">Lead Hook</button>
   <button onclick="startSession('REAR_HOOK')">Rear Hook</button>
-  <button onclick="startSession('LEAD_UPPERCUT')">Lead Uppercut</button>
-  <button onclick="startSession('REAR_UPPERCUT')">Rear Uppercut</button>
 </div>
 
 <div id="training" class="hidden">

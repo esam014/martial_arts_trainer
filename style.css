@@ -1,7 +1,7 @@
 body {
   margin: 0;
-  font-family: Arial, sans-serif;
-  background: #0b0b0b;
+  font-family: system-ui, Arial, sans-serif;
+  background: #0e0e0e;
   color: white;
   text-align: center;
 }
@@ -11,41 +11,24 @@ body {
 }
 
 button {
-  display: block;
   width: 90%;
   max-width: 320px;
+  padding: 16px;
   margin: 10px auto;
-  padding: 15px;
   font-size: 18px;
+  border-radius: 10px;
   border: none;
-  border-radius: 8px;
   background: #ff3b3b;
   color: white;
-}
-
-button:hover {
-  background: #ff5c5c;
-}
-
-#training {
-  position: relative;
 }
 
 #back {
   position: absolute;
   top: 10px;
   left: 10px;
-  z-index: 10;
-}
-
-video, canvas {
-  width: 100vw;
-  height: 100vh;
-  object-fit: cover;
-}
-
-.hidden {
-  display: none;
+  width: auto;
+  padding: 8px 12px;
+  font-size: 14px;
 }
 
 #training {
@@ -53,10 +36,9 @@ video, canvas {
 }
 
 video {
-  position: absolute;
-  top: 0;
-  left: 0;
+  position: relative;
   z-index: 1;
+  width: 100%;
 }
 
 canvas {
@@ -67,3 +49,7 @@ canvas {
   pointer-events: none;
 }
 
+
+.hidden {
+  display: none;
+}

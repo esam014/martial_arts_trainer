@@ -7,7 +7,7 @@ import { SkeletonSimulator } from './simulation/SkeletonSimulator.js';
 
 class BoxingCoachApp {
     constructor() {
-        this.video = new VideoController('video');
+        this.video = new VideoController('video', 'overlay');
         this.pose = new PoseEstimator('video', 'overlay');
         this.mapper = new Joint3DMapper();
         this.analyzer = new MovementAnalyzer();

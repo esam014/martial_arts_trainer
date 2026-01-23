@@ -19,15 +19,16 @@
         <button onclick="app.startSimulation()">Simulator</button>
     </div>
 
-    <video id="video" autoplay muted></video>
-    <canvas id="overlay"></canvas>
+    <div id="video-container">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+    </div>
 
     <!-- MediaPipe -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
-    <!-- App -->
     <script type="module" src="main.js"></script>
-
 </body>
 
 </html>

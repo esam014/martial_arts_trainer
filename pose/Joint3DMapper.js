@@ -3,7 +3,7 @@ export class Joint3DMapper {
         log(landmarks.map(joint => ({
             x: joint.x,
             y: joint.y,
-            z: joint.z // MediaPipe gives relative depth
+            z: joint.z
         })));
         return landmarks.map(joint => ({
             x: joint.x,

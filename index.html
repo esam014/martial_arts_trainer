@@ -1,36 +1,33 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="UTF-8" />
-  <title>Boxing Coach AI</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="stylesheet" href="style.css" />
-
-  <!-- MediaPipe -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-
+    <meta charset="UTF-8" />
+    <title>Boxing Coach</title>
+    <link rel="stylesheet" href="styles.css" />
 </head>
+
 <body>
 
-<div id="menu">
-  <h1>🥊 Boxing Coach</h1>
-  <button onclick="startSession('STANCE')">Stance Coaching</button>
-  <button onclick="startSession('JAB')">Jab</button>
-  <button onclick="startSession('CROSS')">Cross</button>
-  <button onclick="startSession('LEAD_HOOK')">Lead Hook</button>
-  <button onclick="startSession('REAR_HOOK')">Rear Hook</button>
-  <button onclick="startSession('LEAD_UPPERCUT')">Lead Uppercut</button>
-  <button onclick="startSession('REAR_UPPERCUT')">Rear Uppercut</button>
-</div>
+    <h1>🥊 Boxing Coach</h1>
 
-<div id="training" class="hidden">
-  <button id="back" onclick="endSession()">← Back</button>
-  <video id="video" autoplay muted playsinline></video>
-  <canvas id="canvas"></canvas>
-</div>
+    <div id="controls">
+        <button onclick="app.startSession('jab')">Jab</button>
+        <button onclick="app.startSession('cross')">Cross</button>
+        <button onclick="app.startSession('hook')">Hook</button>
+        <button onclick="app.startSession('uppercut')">Uppercut</button>
+        <button onclick="app.startSimulation()">Simulator</button>
+    </div>
 
-<script src="script.js"></script>
+    <video id="video" autoplay muted></video>
+    <canvas id="overlay"></canvas>
+
+    <!-- MediaPipe -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+
+    <!-- App -->
+    <script type="module" src="main.js"></script>
+
 </body>
+
 </html>
